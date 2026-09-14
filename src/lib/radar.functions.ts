@@ -4,6 +4,7 @@ import { base58Encode } from "./base58";
 const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 
 type CreateEvent = {
+  kind: "create";
   name: string;
   symbol: string;
   uri: string;
@@ -12,6 +13,29 @@ type CreateEvent = {
   creator: string;
 };
 
+type TradeEvent = {
+  kind: "trade";
+  mint: string;
+  solAmount: number;
+  tokenAmount: number;
+  isBuy: boolean;
+  user: string;
+  timestamp: number;
+  priceSol: number | null;
+  marketCapSol: number | null;
+};
+
+// Anchor event discriminators emitted by the Pump.fun program.
+const CREATE_DISC = [27, 114, 169, 77, 222, 235, 99, 118];
+const TRADE_DISC = [189, 219, 127, 211, 78, 230, 97, 238];
+const TOKEN_SUPPLY = 1_000_000_000;
+
+function hasDisc(data: Uint8Array, disc: number[]): boolean {
+  if (data.length < 8) return false;
+  for (let i = 0; i < 8; i++) if (data[i] !== disc[i]) return false;
+  return true;
+}
+
 function decodeBase64(input: string): Uint8Array {
   const binary = atob(input);
   const out = new Uint8Array(binary.length);
@@ -19,41 +43,105 @@ function decodeBase64(input: string): Uint8Array {
   return out;
 }
 
-/** Decodes a Pump.fun anchor CreateEvent emitted as a `Program data:` log line. */
-function parseCreateEvent(data: Uint8Array): CreateEvent | null {
-  try {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    let offset = 8; // anchor event discriminator
-    const decoder = new TextDecoder();
-
-    const readString = (): string => {
+function makeReader(data: Uint8Array) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const decoder = new TextDecoder();
+  let offset = 8; // anchor event discriminator
+  return {
+    string(): string {
       const len = view.getUint32(offset, true);
       offset += 4;
       if (len > 200 || offset + len > data.length) throw new Error("bad string");
       const value = decoder.decode(data.subarray(offset, offset + len));
       offset += len;
       return value;
-    };
-    const readPubkey = (): string => {
+    },
+    pubkey(): string {
       if (offset + 32 > data.length) throw new Error("bad pubkey");
       const value = base58Encode(data.subarray(offset, offset + 32));
       offset += 32;
       return value;
-    };
+    },
+    u64(): number {
+      if (offset + 8 > data.length) throw new Error("bad u64");
+      const value = view.getBigUint64(offset, true);
+      offset += 8;
+      return Number(value);
+    },
+    i64(): number {
+      if (offset + 8 > data.length) throw new Error("bad i64");
+      const value = view.getBigInt64(offset, true);
+      offset += 8;
+      return Number(value);
+    },
+    bool(): boolean {
+      if (offset + 1 > data.length) throw new Error("bad bool");
+      const value = data[offset] === 1;
+      offset += 1;
+      return value;
+    },
+  };
+}
 
-    const name = readString();
-    const symbol = readString();
-    const uri = readString();
-    const mint = readPubkey();
-    const bondingCurve = readPubkey();
-    const creator = readPubkey();
-
+/** Decodes a Pump.fun anchor CreateEvent emitted as a `Program data:` log line. */
+function parseCreateEvent(data: Uint8Array): CreateEvent | null {
+  if (!hasDisc(data, CREATE_DISC)) return null;
+  try {
+    const r = makeReader(data);
+    const name = r.string();
+    const symbol = r.string();
+    const uri = r.string();
+    const mint = r.pubkey();
+    const bondingCurve = r.pubkey();
+    const creator = r.pubkey();
     if (!uri.startsWith("http") && !uri.startsWith("ipfs")) return null;
-    return { name, symbol, uri, mint, bondingCurve, creator };
+    return { kind: "create", name, symbol, uri, mint, bondingCurve, creator };
   } catch {
     return null;
   }
 }
+
+/** Decodes a Pump.fun anchor TradeEvent (every buy and sell on the bonding curve). */
+function parseTradeEvent(data: Uint8Array): TradeEvent | null {
+  if (!hasDisc(data, TRADE_DISC)) return null;
+  try {
+    const r = makeReader(data);
+    const mint = r.pubkey();
+    const solAmountRaw = r.u64();
+    const tokenAmountRaw = r.u64();
+    const isBuy = r.bool();
+    const user = r.pubkey();
+    const timestamp = r.i64();
+
+    let priceSol: number | null = null;
+    let marketCapSol: number | null = null;
+    try {
+      const virtualSolReserves = r.u64() / 1e9;
+      const virtualTokenReserves = r.u64() / 1e6;
+      if (virtualTokenReserves > 0) {
+        priceSol = virtualSolReserves / virtualTokenReserves;
+        marketCapSol = priceSol * TOKEN_SUPPLY;
+      }
+    } catch {
+      // older event layout without reserves — price stays unknown
+    }
+
+    return {
+      kind: "trade",
+      mint,
+      solAmount: solAmountRaw / 1e9,
+      tokenAmount: tokenAmountRaw / 1e6,
+      isBuy,
+      user,
+      timestamp,
+      priceSol,
+      marketCapSol,
+    };
+  } catch {
+    return null;
+  }
+}
+
 
 async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
   const res = await fetch(url, {
