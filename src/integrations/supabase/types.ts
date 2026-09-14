@@ -18,44 +18,110 @@ export type Database = {
         Row: {
           block_time: string | null
           bonding_curve: string | null
+          buy_count: number
+          buy_volume_sol: number
           created_at: string
           creator: string | null
           detected_at: string
           id: string
+          last_trade_at: string | null
+          market_cap_sol: number | null
           mint: string
           name: string | null
+          price_sol: number | null
+          sell_count: number
+          sell_volume_sol: number
           signature: string | null
           symbol: string | null
           updated_at: string
           uri: string | null
+          volume_sol: number
         }
         Insert: {
           block_time?: string | null
           bonding_curve?: string | null
+          buy_count?: number
+          buy_volume_sol?: number
           created_at?: string
           creator?: string | null
           detected_at?: string
           id?: string
+          last_trade_at?: string | null
+          market_cap_sol?: number | null
           mint: string
           name?: string | null
+          price_sol?: number | null
+          sell_count?: number
+          sell_volume_sol?: number
           signature?: string | null
           symbol?: string | null
           updated_at?: string
           uri?: string | null
+          volume_sol?: number
         }
         Update: {
           block_time?: string | null
           bonding_curve?: string | null
+          buy_count?: number
+          buy_volume_sol?: number
           created_at?: string
           creator?: string | null
           detected_at?: string
           id?: string
+          last_trade_at?: string | null
+          market_cap_sol?: number | null
           mint?: string
           name?: string | null
+          price_sol?: number | null
+          sell_count?: number
+          sell_volume_sol?: number
           signature?: string | null
           symbol?: string | null
           updated_at?: string
           uri?: string | null
+          volume_sol?: number
+        }
+        Relationships: []
+      }
+      pump_trades: {
+        Row: {
+          created_at: string
+          id: string
+          is_buy: boolean
+          market_cap_sol: number | null
+          mint: string
+          price_sol: number | null
+          signature: string
+          sol_amount: number
+          token_amount: number
+          trade_time: string
+          user_wallet: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_buy: boolean
+          market_cap_sol?: number | null
+          mint: string
+          price_sol?: number | null
+          signature: string
+          sol_amount?: number
+          token_amount?: number
+          trade_time?: string
+          user_wallet?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_buy?: boolean
+          market_cap_sol?: number | null
+          mint?: string
+          price_sol?: number | null
+          signature?: string
+          sol_amount?: number
+          token_amount?: number
+          trade_time?: string
+          user_wallet?: string | null
         }
         Relationships: []
       }
