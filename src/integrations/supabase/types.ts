@@ -14,7 +14,69 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      pump_tokens: {
+        Row: {
+          block_time: string | null
+          bonding_curve: string | null
+          created_at: string
+          creator: string | null
+          detected_at: string
+          id: string
+          mint: string
+          name: string | null
+          signature: string | null
+          symbol: string | null
+          updated_at: string
+          uri: string | null
+        }
+        Insert: {
+          block_time?: string | null
+          bonding_curve?: string | null
+          created_at?: string
+          creator?: string | null
+          detected_at?: string
+          id?: string
+          mint: string
+          name?: string | null
+          signature?: string | null
+          symbol?: string | null
+          updated_at?: string
+          uri?: string | null
+        }
+        Update: {
+          block_time?: string | null
+          bonding_curve?: string | null
+          created_at?: string
+          creator?: string | null
+          detected_at?: string
+          id?: string
+          mint?: string
+          name?: string | null
+          signature?: string | null
+          symbol?: string | null
+          updated_at?: string
+          uri?: string | null
+        }
+        Relationships: []
+      }
+      radar_state: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
