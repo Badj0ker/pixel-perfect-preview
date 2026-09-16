@@ -161,28 +161,38 @@ async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T
  */
 export const pollPumpTokens = createServerFn({ method: "POST" }).handler(async () => {
   const apiKey = process.env["HELIUS_API_KEY"];
-  if (!apiKey) return { ok: false, error: "missing_rpc_key", inserted: 0, scanned: 0 };
+  if (!apiKey)
+    return { ok: false, error: "missing_rpc_key", inserted: 0, scanned: 0, trades: 0 };
 
   const url = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
   let scanned = 0;
   let inserted = 0;
+  let tradesInserted = 0;
 
   try {
     const signatures = await rpc<Array<{ signature: string; err: unknown }>>(
       url,
       "getSignaturesForAddress",
-      [PUMP_PROGRAM, { limit: 25 }],
+      [PUMP_PROGRAM, { limit: 40 }],
     );
     const candidates = signatures.filter((s) => !s.err).map((s) => s.signature);
 
-    const { data: known } = await supabaseAdmin
+    // Skip transactions already processed (token creations OR trades recorded).
+    const { data: knownTokens } = await supabaseAdmin
       .from("pump_tokens")
       .select("signature")
       .in("signature", candidates);
-    const knownSet = new Set((known ?? []).map((k) => k.signature));
-    const fresh = candidates.filter((s) => !knownSet.has(s)).slice(0, 12);
+    const { data: knownTrades } = await supabaseAdmin
+      .from("pump_trades")
+      .select("signature")
+      .in("signature", candidates);
+    const knownSet = new Set([
+      ...(knownTokens ?? []).map((k) => k.signature),
+      ...(knownTrades ?? []).map((k) => k.signature),
+    ]);
+    const fresh = candidates.filter((s) => !knownSet.has(s)).slice(0, 15);
 
     const results = await Promise.all(
       fresh.map(async (signature) => {
@@ -195,25 +205,14 @@ export const pollPumpTokens = createServerFn({ method: "POST" }).handler(async (
             { maxSupportedTransactionVersion: 0, encoding: "json" },
           ]);
           if (!tx?.meta?.logMessages) return null;
+          const parsed = { create: null as CreateEvent | null, trade: null as TradeEvent | null };
           for (const log of tx.meta.logMessages) {
             if (!log.startsWith("Program data: ")) continue;
-            const event = parseCreateEvent(decodeBase64(log.slice("Program data: ".length)));
-            if (event) {
-              return {
-                mint: event.mint,
-                name: event.name,
-                symbol: event.symbol,
-                uri: event.uri,
-                creator: event.creator,
-                bonding_curve: event.bondingCurve,
-                signature,
-                block_time: tx.blockTime
-                  ? new Date(tx.blockTime * 1000).toISOString()
-                  : new Date().toISOString(),
-              };
-            }
+            const raw = decodeBase64(log.slice("Program data: ".length));
+            if (!parsed.create) parsed.create = parseCreateEvent(raw);
+            if (!parsed.trade) parsed.trade = parseTradeEvent(raw);
           }
-          return null;
+          return { signature, blockTime: tx.blockTime, ...parsed };
         } catch {
           return null;
         }
@@ -221,28 +220,78 @@ export const pollPumpTokens = createServerFn({ method: "POST" }).handler(async (
     );
 
     scanned = fresh.length;
-    const rows = results.filter((r): r is NonNullable<typeof r> => r !== null);
+    const txs = results.filter((r): r is NonNullable<typeof r> => r !== null);
 
-    if (rows.length > 0) {
+    const tokenRows = txs
+      .filter((t) => t.create)
+      .map((t) => ({
+        mint: t.create!.mint,
+        name: t.create!.name,
+        symbol: t.create!.symbol,
+        uri: t.create!.uri,
+        creator: t.create!.creator,
+        bonding_curve: t.create!.bondingCurve,
+        signature: t.signature,
+        block_time: t.blockTime
+          ? new Date(t.blockTime * 1000).toISOString()
+          : new Date().toISOString(),
+      }));
+
+    if (tokenRows.length > 0) {
       const { data, error } = await supabaseAdmin
         .from("pump_tokens")
-        .upsert(rows, { onConflict: "mint", ignoreDuplicates: true })
+        .upsert(tokenRows, { onConflict: "mint", ignoreDuplicates: true })
         .select("mint");
       if (error) throw error;
       inserted = data?.length ?? 0;
     }
 
-    await supabaseAdmin
-      .from("radar_state")
-      .upsert({ key: "listener", value: { last_run: new Date().toISOString(), scanned, inserted } });
+    const tradeRows = txs
+      .filter((t) => t.trade)
+      .map((t) => ({
+        mint: t.trade!.mint,
+        is_buy: t.trade!.isBuy,
+        sol_amount: t.trade!.solAmount,
+        token_amount: t.trade!.tokenAmount,
+        user_wallet: t.trade!.user,
+        signature: t.signature,
+        price_sol: t.trade!.priceSol,
+        market_cap_sol: t.trade!.marketCapSol,
+        trade_time: t.trade!.timestamp
+          ? new Date(t.trade!.timestamp * 1000).toISOString()
+          : new Date().toISOString(),
+      }));
 
-    return { ok: true, inserted, scanned };
+    if (tradeRows.length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from("pump_trades")
+        .upsert(tradeRows, { onConflict: "signature", ignoreDuplicates: true })
+        .select("id");
+      if (error) throw error;
+      tradesInserted = data?.length ?? 0;
+    }
+
+    // Housekeeping: drop trades older than 24h (roughly every 20th run).
+    if (Math.random() < 0.05) {
+      await supabaseAdmin
+        .from("pump_trades")
+        .delete()
+        .lt("trade_time", new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+    }
+
+    await supabaseAdmin.from("radar_state").upsert({
+      key: "listener",
+      value: { last_run: new Date().toISOString(), scanned, inserted, trades: tradesInserted },
+    });
+
+    return { ok: true, inserted, scanned, trades: tradesInserted };
   } catch (error) {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "unknown_error",
       inserted,
       scanned,
+      trades: tradesInserted,
     };
   }
 });
