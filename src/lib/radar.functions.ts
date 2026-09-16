@@ -265,7 +265,10 @@ export const pollPumpTokens = createServerFn({ method: "POST" }).handler(async (
     if (tradeRows.length > 0) {
       const { data, error } = await supabaseAdmin
         .from("pump_trades")
-        .upsert(tradeRows, { onConflict: "signature", ignoreDuplicates: true })
+        .upsert(tradeRows, {
+          onConflict: "signature,mint,is_buy,sol_amount",
+          ignoreDuplicates: true,
+        })
         .select("id");
       if (error) throw error;
       tradesInserted = data?.length ?? 0;
