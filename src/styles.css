@@ -173,3 +173,23 @@
   animation: row-in 1.2s ease-out;
 }
 
+@utility sort-btn {
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sort-btn:hover {
+  color: var(--foreground);
+}
+
+@utility sort-btn-active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
