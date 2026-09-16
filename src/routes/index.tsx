@@ -61,6 +61,7 @@ function shortAddress(value: string | null) {
 
 function formatSol(value: number | null | undefined) {
   if (value == null) return "—";
+  if (value === 0) return "0";
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
   if (value >= 1) return value.toFixed(2);
   if (value >= 0.001) return value.toFixed(4);
